@@ -1,1 +1,16 @@
 __pycache__
+output/
+*.bak
+TODO-*.md
+venv/
+blinkist/.github/
+blinkist/.gitignore
+blinkist/.vscode/
+blinkist/Dockerfile
+blinkist/LICENSE
+blinkist/README.md
+blinkist/build/
+blinkist/main.py
+blinkist/requirements.txt
+blinkist/schema_*
+blinkist/tests/
