@@ -14,3 +14,4 @@ blinkist/main.py
 blinkist/requirements.txt
 blinkist/schema_*
 blinkist/tests/
+archive/

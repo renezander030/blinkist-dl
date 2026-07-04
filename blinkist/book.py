@@ -10,6 +10,15 @@ from .config import BASE_URL, FILENAME_COVER, FILENAME_RAW, FILENAME_TEXT
 from .console import track
 
 
+def _section_has_header(section: dict) -> bool:
+    """True if a transcript section starts a new chapter (has a non-empty header)."""
+    for comp in section.get('transcriptComponents', []):
+        if comp.get('componentType') == 'header' and \
+                ((comp.get('value') or {}).get('html') or '').strip():
+            return True
+    return False
+
+
 class Book:
     def __init__(self, book_data: dict) -> None:
         self.data = book_data
@@ -38,24 +47,52 @@ class Book:
         return Book(api_request_web(f'books/{slug}'))
 
     @cached_property
+    def transcript(self) -> dict:
+        """
+        The reader transcript — Blinkist's content source since the 2026 API
+        migration (the old REST chapter endpoints now return 404). Free dailies
+        are readable by guests, so no auth token is required.
+        """
+        url = f'https://api.blinkist.com/transcripts/{self.id}?language={self.language}'
+        transcript = request(url).json().get('transcript') or {}
+        sections = transcript.get('transcriptSections') or []
+        if not sections:
+            raise RuntimeError(
+                f"No transcript sections for “{self.title}” ({self.slug}). "
+                f"Book may not be accessible to guests."
+            )
+        return transcript
+
+    @cached_property
     def chapter_list(self) -> List[dict]:
         """
-        Returns the chapter list straight from the API.
-        Does not include their respective contents.
+        Returns the raw transcript sections (one per chapter). Kept under the
+        original name so the download orchestration stays unchanged.
         """
-        return api_request_web(f'books/{self.slug}/chapters')['chapters']
+        return self.transcript['transcriptSections']
 
     @cached_property
     def chapters(self) -> List[Chapter]:
         """
         Returns a list of Chapter objects, which contain the actual content.
-        Shows a progress bar while downloading.
+
+        Transcript sections don't map 1:1 to chapters: a section with a
+        non-empty `header` component starts a new chapter, and any headerless
+        sections after it are continuations. So we group sections by header
+        before building each Chapter. Shows a progress bar while building.
         """
-        chapters = [
-            Chapter.from_id(self, chapter['id'])
-            for chapter in track(self.chapter_list, description="Fetching chapters…")
+        groups: List[List[dict]] = []
+        for section in self.chapter_list:
+            if not groups or _section_has_header(section):
+                groups.append([section])
+            else:
+                groups[-1].append(section)
+        return [
+            Chapter.from_transcript_sections(group, order_no)
+            for order_no, group in enumerate(
+                track(groups, description="Fetching chapters…")
+            )
         ]
-        return chapters
 
     def download_cover(self, target_dir: Path) -> None:
         """

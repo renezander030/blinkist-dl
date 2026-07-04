@@ -1,4 +1,5 @@
 import logging
+import re
 from pathlib import Path  # typing only
 
 from .common import api_request_web, download
@@ -13,8 +14,42 @@ class Chapter:
 
     @staticmethod
     def from_id(book, chapter_id) -> 'Chapter':
+        # NOTE: Legacy REST endpoint, removed by Blinkist in 2026 (returns 404).
+        # Kept for reference; content now comes via Chapter.from_transcript_section().
         chapter_data = api_request_web(f'books/{book.id}/chapters/{chapter_id}')
         return Chapter(chapter_data)
+
+    @staticmethod
+    def from_transcript_sections(sections: list, order_no: int) -> 'Chapter':
+        """
+        Builds a Chapter from a group of reader-transcript sections
+        (https://api.blinkist.com/transcripts/{book_id}?language={locale}).
+
+        A chapter starts at a section carrying a non-empty `header` component
+        (the chapter title); any headerless sections that follow are body
+        continuations of that same chapter, so a chapter can span several
+        sections. `text` components hold the body (already HTML-wrapped);
+        `marker` components are positional anchors with no content and are dropped.
+        """
+        title = ''
+        body_parts = []
+        for section in sections:
+            for comp in section.get('transcriptComponents', []):
+                html = ((comp.get('value') or {}).get('html') or '').strip()
+                if not html:
+                    continue
+                ctype = comp.get('componentType')
+                if ctype == 'header' and not title:
+                    title = re.sub(r'<[^>]+>', '', html).strip()
+                elif ctype == 'text':
+                    body_parts.append(html)
+        return Chapter({
+            'id': f'section-{order_no}',
+            'order_no': order_no,
+            'action_title': title,
+            # Body stays as HTML — download_text_md relies on that (no MD escaping needed).
+            'text': '\n\n'.join(body_parts),
+        })
 
     def serialize(self) -> dict:
         """
