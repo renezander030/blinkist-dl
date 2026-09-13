@@ -14,7 +14,11 @@ No Telegram.
     blinkist-reading-signals.py            # dry-run: prints, writes nothing
     blinkist-reading-signals.py --commit   # create Steering note + send email
 """
-import os, sys, re, json, glob, html as _html, time, subprocess, datetime
+import os, sys, re, json, glob, html as _html, time, subprocess, datetime, shutil
+
+# cron runs with PATH=/usr/bin:/bin, so a bare "ats" raises FileNotFoundError and every
+# lookup silently returns []. Resolve it once, explicitly.
+ATS_BIN = os.environ.get("ATS_BIN") or shutil.which("ats") or "/usr/local/bin/ats"
 import urllib.request, urllib.error, argparse
 
 ARCHIVE_DIR  = "/home/debian/blinkist-app/archive"
@@ -182,13 +186,17 @@ def recent_tasks(days):
     return by_id
 
 # ---------------------------------------------------------------- vector match (ats hybrid)
+ATS_STATS = {"ok": 0, "fail": 0}
+
 def ats_candidates(query, k=CAND_PER_Q):
     try:
-        out = subprocess.run(["ats", "hybrid", query, "--json"],
+        out = subprocess.run([ATS_BIN, "hybrid", query, "--json"],
                              capture_output=True, text=True, timeout=60)
         j = json.loads(out.stdout or "{}")
+        ATS_STATS["ok"] += 1
         return [t["id"] for t in j.get("tasks", [])[:k] if t.get("id")]
     except Exception as e:
+        ATS_STATS["fail"] += 1
         log("ats hybrid fail %r: %s" % (query[:40], e))
         return []
 
@@ -269,7 +277,7 @@ def build_prompt(goals, books):
                               goals=goals or "(none provided)",
                               books="\n\n".join(blocks))
 
-def run_claude(prompt):
+def run_claude(prompt, attempts=3):
     cenv = {"HOME": "/home/debian", "USER": "debian", "SHELL": "/bin/bash",
             "PATH": "/home/debian/.local/bin:/home/debian/.nvm/versions/node/v22.22.0/bin:/usr/local/bin:/usr/bin:/bin"}
     try:
@@ -281,10 +289,20 @@ def run_claude(prompt):
         log("claude timeout"); return None
     raw = out.stdout.strip()
     if not raw:
-        log("claude empty (stderr: %s)" % out.stderr[:200]); return None
+        log("claude empty (stderr: %s)" % out.stderr[:200])
+        if attempts > 1:
+            time.sleep(60)
+            log("empty output - retrying analysis (%d left)" % (attempts - 1))
+            return run_claude(prompt, attempts - 1)
+        return None
     m = re.search(r"\{.*\}", raw, re.S)      # tolerate stray prose around the JSON
     if not m:
-        log("no JSON in claude output: %s" % raw[:200]); return None
+        log("no JSON in claude output: %s" % raw[:200])
+        if attempts > 1 and re.search(r"(429|500|502|503|529|overloaded|rate.?limit)", raw, re.I):
+            time.sleep(60)
+            log("transient API error - retrying analysis (%d left)" % (attempts - 1))
+            return run_claude(prompt, attempts - 1)
+        return None
     try:
         return json.loads(m.group(0))
     except Exception as e:
@@ -335,6 +353,11 @@ def main():
     match_books_to_tasks(books, recent)
     total_matches = sum(len(b["matches"]) for b in books)
     log("book→task candidate matches: %d" % total_matches)
+    log("ats retrieval: %d ok, %d failed" % (ATS_STATS["ok"], ATS_STATS["fail"]))
+    if ATS_STATS["ok"] == 0:
+        log("ABORT: every ats hybrid call failed (%d) - retrieval is down, so a zero here "
+            "would be an artefact, not a reading result. Not writing a note." % ATS_STATS["fail"])
+        sys.exit(2)
 
     goals = goal_context(steering_pid)
     prompt = build_prompt(goals, books)
