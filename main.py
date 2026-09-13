@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import logging
+import sys
 from pathlib import Path
 
 import click
@@ -150,10 +151,18 @@ def main(**kwargs):
                 logging.info(f"Collection: “{collection.title}”")
                 books_to_download |= set(collection.books)
 
+    free_daily_failures = []
     if kwargs['freedaily']:
         for language_ in languages_to_download:
-            with console.status(f"Retrieving free daily in {language_}…"):
-                book = get_free_daily(locale=language_)
+            try:
+                with console.status(f"Retrieving free daily in {language_}…"):
+                    book = get_free_daily(locale=language_)
+            except Exception as e:
+                # A failing locale must not block the others; remember it so the
+                # run still exits non-zero once the available books are downloaded.
+                logging.error(f"Free daily ({language_}) unavailable: {type(e).__name__}: {e}")
+                free_daily_failures.append(language_)
+                continue
             books_to_download.add(book)
 
     if kwargs['search']:
@@ -186,6 +195,7 @@ def main(**kwargs):
         logging.info("Hint: Try passing an option like --freedaily.")
         if kwargs['language']:
             logging.info("Hint: Maybe there were no books in the specified --language?")
+        _exit_if_free_daily_failed(free_daily_failures)
         return
 
     with track_context:
@@ -200,6 +210,16 @@ def main(**kwargs):
                     book=book,
                     **kwargs
                 )
+
+    _exit_if_free_daily_failed(free_daily_failures)
+
+
+def _exit_if_free_daily_failed(failed_locales):
+    """Exit non-zero when a free daily could not be retrieved, even if the
+    other locales downloaded fine, so the caller can retry."""
+    if failed_locales:
+        logging.critical(f"Free daily missing for: {', '.join(failed_locales)} — exiting non-zero so the caller retries.")
+        sys.exit(1)
 
 
 if __name__ == '__main__':
