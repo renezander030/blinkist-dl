@@ -1,4 +1,5 @@
 click~=8.1.7
+curl_cffi>=0.7.0,<0.17
 cloudscraper~=1.2.71
 pyyaml~=6.0
 rich~=13.7.1

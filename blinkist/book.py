@@ -1,4 +1,5 @@
 from functools import cached_property
+import os
 from pathlib import Path  # typing only
 from typing import List
 
@@ -8,6 +9,7 @@ from .chapter import Chapter
 from .common import api_request_web, download, request
 from .config import BASE_URL, FILENAME_COVER, FILENAME_RAW, FILENAME_TEXT
 from .console import track
+from .reader_auth import ReaderClient, audio_redirect
 
 
 def _section_has_header(section: dict) -> bool:
@@ -39,6 +41,10 @@ class Book:
     def __eq__(self, o) -> bool:
         return isinstance(o, Book) and self.id == o.id
 
+    @cached_property
+    def reader_client(self):
+        return ReaderClient()
+
     @staticmethod
     def from_slug(slug: str) -> 'Book':
         """
@@ -54,7 +60,14 @@ class Book:
         are readable by guests, so no auth token is required.
         """
         url = f'https://api.blinkist.com/transcripts/{self.id}?language={self.language}'
-        transcript = request(url).json().get('transcript') or {}
+        if os.environ.get('BLINKIST_COOKIES_FILE'):
+            transcript = self.reader_client.transcript(self.id, self.language)
+        else:
+            response = request(url)
+            try:
+                transcript = response.json().get('transcript') or {}
+            finally:
+                response.close()
         sections = transcript.get('transcriptSections') or []
         if not sections:
             raise RuntimeError(
@@ -62,6 +75,21 @@ class Book:
                 f"Book may not be accessible to guests."
             )
         return transcript
+
+    def download_audio(self, target_dir: Path) -> None:
+        """Save the current whole-book recording without audio re-encoding."""
+        if not self.is_audio:
+            raise ValueError('No audio is advertised for this book')
+        if os.environ.get('BLINKIST_COOKIES_FILE'):
+            source = self.reader_client.resolve(self.id, extension='m4a', language=self.language)
+        else:
+            response = request(f'https://api.blinkist.com/v4/audio/{self.id}.m4a',
+                               params={'language': self.language}, allow_redirects=False)
+            try:
+                source = audio_redirect(response, self.id, 'm4a', self.language)
+            finally:
+                response.close()
+        download(source, target_dir / 'book.m4a', audio=True)
 
     @cached_property
     def chapter_list(self) -> List[dict]:

@@ -12,7 +12,7 @@ To be precise, it saves…
     - the unmodified HTML-formatted content + custom Markdown-formatted structure
     - 🛈 Consider using [Pandoc](https://pandoc.org/) to convert to other formats like HTML, PDF, EPUB, etc.
 - the audio version
-  - as one M4A file per chapter (no modifications)
+  - as one complete `book.m4a` recording (no re-encoding)
 - the cover image
   - as JPEG (no modifications)
   - in the highest resolution available (1080×1080)
@@ -25,8 +25,9 @@ To be precise, it saves…
 - 🛈 If you pass multiple of these options, all of them will be used.
 
 > [!IMPORTANT]
-> It seems like Blinkist now prevents unauthorized access to books.
-> If you have a Blinkist Premium account, check out the [`feature/import-session`](https://github.com/NicoWeio/blinkist/tree/feature/import-session) branch.
+> Premium content requires your own authorized Blinkist session. Use
+> `--cookies-file` as described below; requests without a session retain the
+> existing free-content behavior.
 
 
 ## Installation
@@ -47,6 +48,23 @@ Here's an example:
 ```bash
 $ ./main.py --freedaily ~/Library/Blinkist
 ```
+
+For an accessible Premium book, export your own Blinkist session as a JSON
+cookie array or Netscape cookie file, then run:
+
+```bash
+python main.py --cookies-file /private/blinkist-cookies.json --book-slug <book-slug> ~/Library/Blinkist
+```
+
+Keep the export private and outside the repository. Only unexpired cookies for
+Blinkist domains are imported. The reader setup exchanges this session for an
+in-memory JWT; the JWT authorizes transcript and whole-book audio requests.
+Audio redirects are checked against the exact book ID and language, then fetched
+with a separate cookie-free CDN client. Tokens and signed URLs are not logged.
+An expired or denied session fails; renew it through your normal Blinkist login.
+Audio-only downloads (`--no-yaml --no-markdown`) do not request transcripts.
+Install FFprobe for audio stream and duration validation. Without it, only the
+MP4 container signature and transfer length are checked.
 For an overview of all CLI options, see `main.py --help`.
 For other options, you need to modify [`blinkist/config.py`](blinkist/config.py) to your needs.
 
@@ -58,7 +76,7 @@ In contrast to the original, this one relies on Blinkist's API, which might be m
 Now, some aspects are even better than in the original, while others are sill lacking.
 
 ## Limitations
-- Downloading arbitrary books with Blinkist Premium is not supported out of the box. It might be easy to get it working, but I didn't test it. There's other tools for that anyway.
+- A cookie export must be renewed when the account session expires. Only content accessible to that account can be downloaded.
 - ID3 tags are not set.
 - The formatting of the markdown export differs a little from @ptrstn's.
 - Occasionaly, Cloudflare gets in the way.

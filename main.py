@@ -1,5 +1,6 @@
 #!/usr/bin/env python3
 import logging
+import os
 import sys
 from pathlib import Path
 
@@ -63,10 +64,11 @@ def download_book(
 
     try:
         # prefetch chapter_list and chapters for nicer progress info
-        with status("Retrieving list of chapters…"):
-            _ = book.chapter_list
-        # this displays a progress bar itself ↓
-        _ = book.chapters
+        if yaml or markdown:
+            with status("Retrieving list of chapters…"):
+                _ = book.chapter_list
+            # Transcript access is unnecessary for audio-only downloads.
+            _ = book.chapters
 
         # download raw (YAML)
         # This comes first so we have all information saved as early as possible.
@@ -82,8 +84,7 @@ def download_book(
         # download audio
         if audio:
             if book.is_audio:
-                for chapter in track(book.chapters, description="Downloading audio…"):
-                    chapter.download_audio(book_tmp_dir)
+                book.download_audio(book_tmp_dir)
             else:
                 logging.warning("This book has no audio.")
 
@@ -113,6 +114,8 @@ def download_book(
 @click.argument('library_dir', type=click.Path(exists=True, dir_okay=True, writable=True, path_type=Path))
 # ▒ general options ↓
 @click.option('--continue-on-error', '-c', help="Continue downloading the next book after an error.", is_flag=True, default=False)
+@click.option('--cookies-file', type=click.Path(exists=True, dir_okay=False, readable=True, path_type=Path),
+              help="Use an explicitly exported Blinkist JSON or Netscape cookie file for Premium access.")
 @click.option('--language', '-l', help="Language to download content in. Other languages will be skipped. Defaults to all languages.", type=click.Choice(LANGUAGES), default=None)
 # FIXME: Invocations with --no-download shouldn't need the library_dir argument
 @click.option('--no-download', '-n', help="Don't actually save anything, just print what would be downloaded.", is_flag=True, default=False)
@@ -134,6 +137,8 @@ def download_book(
 # ▒▒ processed
 @click.option('--markdown/--no-markdown', help="Save content as Markdown", default=True)
 def main(**kwargs):
+    if kwargs.get('cookies_file'):
+        os.environ['BLINKIST_COOKIES_FILE'] = str(kwargs['cookies_file'].resolve())
     languages_to_download = [kwargs['language']] if kwargs['language'] else LANGUAGES  # default to all languages
     books_to_download = set()
 

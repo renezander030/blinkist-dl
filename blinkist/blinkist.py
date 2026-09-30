@@ -1,7 +1,7 @@
 from typing import Dict, List, Optional
 
 from .book import Book
-from .common import api_request_app, api_request_web, scraper
+from .common import api_request_app, api_request_web
 from .config import HEADERS_ALGOLIA
 from .console import track
 from .curated_list import CuratedList
